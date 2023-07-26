@@ -1,0 +1,10 @@
+<!-- res/xml/network_security_config.xml -->
+<network-security-config>
+    <!-- Set cleartextTrafficPermitted to false to block all cleartext (non-HTTPS) traffic -->
+    <base-config cleartextTrafficPermitted="false">
+        <!-- Include the domains for which you want to allow cleartext traffic -->
+        <!--<domain-config cleartextTrafficPermitted="true">
+            <domain>example.com</domain>
+        </domain-config>-->
+    </base-config>
+</network-security-config>

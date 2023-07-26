@@ -1,0 +1,24 @@
+<resources>
+    <!-- Base application theme. -->
+    <style name="Theme.Minimal" parent="@android:style/Theme.Holo.Light">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBarOverlay">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <!-- Primary brand color. -->
+        <item name="android:colorBackground">@android:color/background_dark</item>
+        <item name="android:windowBackground">@android:color/background_dark</item>
+        <!-- Status bar color. -->
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <!-- navigation bar color. -->
+        <item name="android:windowTranslucentNavigation">false</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- theme customization. -->
+        <item name="colorControlHighlight">@color/overlay_light_20</item>
+        <item name="android:selectableItemBackground">@drawable/item_background_material</item>
+        <item name="android:selectableItemBackgroundBorderless">@drawable/item_background_borderless_material</item>
+    </style>
+</resources>
