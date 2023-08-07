@@ -691,7 +691,7 @@ public class NetworkConnection implements Connection.Delegate, NetworkConnection
                         Task.whenAll(authToken, appCheckToken)
                                 .addOnSuccessListener(
                                         executorService,
-                                        aVoid -> {
+                                        result -> {
                                             if (thisGetTokenAttempt == currentGetTokenAttempt) {
                                                 if (connectionState == ConnectionState.GettingToken) {
                                                     logger.debug("Successfully fetched token, opening connection");

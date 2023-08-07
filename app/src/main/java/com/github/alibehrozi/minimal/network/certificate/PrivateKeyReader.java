@@ -1,4 +1,4 @@
-package com.github.alibehrozi.minimal.network.tubesock;
+package com.github.alibehrozi.minimal.network.certificate;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;

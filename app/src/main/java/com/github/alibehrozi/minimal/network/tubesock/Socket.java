@@ -14,15 +14,18 @@
 
 package com.github.alibehrozi.minimal.network.tubesock;
 
-import static com.github.alibehrozi.minimal.AppLoader.getInputStreamFromAssets;
+import android.os.Build;
 
 import com.github.alibehrozi.minimal.network.ConnectionContext;
+import com.github.alibehrozi.minimal.network.certificate.CertificateException;
+import com.github.alibehrozi.minimal.network.certificate.CertificateUtils;
 import com.github.alibehrozi.minimal.network.core.annotations.Nullable;
 import com.github.alibehrozi.minimal.utilities.logging.LogWrapper;
 
+import org.bouncycastle.operator.OperatorCreationException;
+
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -30,38 +33,27 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyManagementException;
-import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.UnrecoverableKeyException;
-import java.security.cert.Certificate;
-import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
-import java.security.cert.X509Certificate;
-import java.security.spec.InvalidKeySpecException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import javax.net.SocketFactory;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
-import javax.net.ssl.X509KeyManager;
-import javax.net.ssl.X509TrustManager;
-
 
 /**
  * This is the main class used to create a Socket connection. Create a new instance, set an event
@@ -316,139 +308,98 @@ public class Socket {
                 port = 443;
             }
 
-            // Create and initialize the SSLContext with key material
-            char[] passphrase = "passphrase".toCharArray();
-            KeyStore ksKeys;
-            KeyStore ksTrust;
-            try {
-                // initialize the key and trust material
-                ksKeys = KeyStore.getInstance(KeyStore.getDefaultType());
-                ksKeys.load(null, null);
-
-                ksTrust = KeyStore.getInstance(KeyStore.getDefaultType());
-                ksTrust.load(null, null);
-
-            } catch (CertificateException cre) {
-                throw new SocketException("error while creating keystore certificate", cre);
-            } catch (KeyStoreException kse) {
-                throw new SocketException("error while creating keystore", kse);
-            } catch (NoSuchAlgorithmException nsae) {
-                throw new SocketException("unknown algorithm: JKS", nsae);
-            } catch (IOException ioe) {
-                throw new SocketException("error while opening certificate to " + url, ioe);
-            }
+            // Create an instance of the CertificateUtils class, which is a utility class
+            // responsible for creating and managing certificates
+            CertificateUtils certificateUtils = new CertificateUtils();
 
             KeyManagerFactory keyManagerFactory;
             try {
-                // Load client certificate
-                InputStream certificateStream = getInputStreamFromAssets("client-cert.pem");
-                CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
-                X509Certificate clientCert = (X509Certificate) certificateFactory.generateCertificate(certificateStream);
-
-                // Load client private key
-                InputStream keyInputStream = getInputStreamFromAssets("client-key.pem");
-                PrivateKey clientPrivateKey = PrivateKeyReader.getPrivateKey(keyInputStream);
-
-                // initialize client SSL context (client authorization)
-                ksKeys.setCertificateEntry("client", clientCert);
-                ksKeys.setKeyEntry("client",
-                        clientPrivateKey,
-                        null,
-                        new X509Certificate[]{clientCert});
-
-                // KeyManagers decide which key material to use
-                keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-                keyManagerFactory.init(ksKeys, null);
-
-                KeyManager[] keyManagers = keyManagerFactory.getKeyManagers();
-
-                if (keyManagers.length != 1 || !(keyManagers[0] instanceof X509KeyManager)) {
-                    throw new SocketException("Unexpected default key managers:"
-                            + Arrays.toString(keyManagers));
-                }
+                // Use the CertificateUtils to create a KeyManagerFactory.
+                // The KeyManagerFactory is responsible for managing the client-side keys used during SSL/TLS handshake.
+                keyManagerFactory = certificateUtils.initKeyManager(null);
 
             } catch (UnrecoverableKeyException uke) {
-                throw new SocketException("error while creating keyManagerFactory", uke);
-            } catch (CertificateException ce) {
-                throw new SocketException("error while creating CertificateFactory", ce);
+                throw new CertificateException("error while creating KeyManagerFactory", uke);
+            } catch (java.security.cert.CertificateException ce) {
+                throw new CertificateException("error while creating Certificate", ce);
             } catch (IOException ioe) {
-                throw new SocketException("error while opening client-cert from assets", ioe);
+                throw new CertificateException("io error with the client-certificate file.", ioe);
             } catch (NoSuchAlgorithmException nsae) {
-                throw new SocketException("unknown algorithm: X.509 || RSA", nsae);
-            } catch (InvalidKeySpecException ikse) {
-                throw new SocketException("error while initializing keystore with invalid key spec", ikse);
+                throw new CertificateException("Unknown algorithm: X.509 || RSA", nsae);
             } catch (KeyStoreException kse) {
-                throw new SocketException("error while initializing keystore with client-certificates", kse);
+                throw new CertificateException("error while initializing KeyStore with client-certificates", kse);
             } catch (GeneralSecurityException gse) {
-                throw new SocketException("error while initializing keystore with client-certificates SecurityException", gse);
+                throw new CertificateException("security error while initializing client certificates", gse);
+            } catch (OperatorCreationException oce) {
+                throw new CertificateException("error while initializing client certificates", oce);
             }
 
+            TrustManager[] allTrustManagers;
             TrustManagerFactory trustManagerFactory;
+            TrustManagerFactory deviceDefaultTrustManagerFactory;
+
+            // Use the CertificateUtils to create a TrustManagerFactory.
+            // The TrustManagerFactory is responsible for managing the server-side trust anchors (certificates)
+            // used during SSL/TLS handshake to authenticate the server's identity.
             try {
+                // Create the TrustManagerFactory using your custom trust store
+                // (you can pass null for default trust managers)
+                trustManagerFactory =
+                        certificateUtils.initTrustManager(null);
 
-                // Load server certificate
-                InputStream certificateStream = getInputStreamFromAssets("server-cert.pem");
-                CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
-                Collection<? extends Certificate> certificates =
-                        certificateFactory.generateCertificates(certificateStream);
+                // Obtain the default TrustManagerFactory with the device's default trust store
+                deviceDefaultTrustManagerFactory =
+                        certificateUtils.getDefaultTrustManagers();
 
-                if (certificates.isEmpty()) {
-                    throw new SocketException("expected non-empty set of trusted certificates");
-                }
 
-                int index = 0;
-                for (Certificate certificate : certificates) {
-                    String certificateAlias = Integer.toString(index++);
-                    ksTrust.setCertificateEntry(certificateAlias, certificate);
-                }
+                // Get the array of TrustManagers from the device's default trust store
+                TrustManager[] deviceDefaultTrustManagers =
+                        deviceDefaultTrustManagerFactory.getTrustManagers();
 
-                // TrustManagers decide whether to allow connections
-                trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-                trustManagerFactory.init(ksTrust);
+                // Get the array of TrustManagers from your custom trust store
+                TrustManager[] customTrustManagers =
+                        trustManagerFactory.getTrustManagers();
 
-                TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
+                // Concatenate the arrays of TrustManagers from both sources into a single array
+                allTrustManagers = Stream.concat(
+                                Arrays.stream(deviceDefaultTrustManagers),
+                                Arrays.stream(customTrustManagers))
+                        .toArray(TrustManager[]::new);
 
-                if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
-                    throw new SocketException("Unexpected default trust managers:"
-                            + Arrays.toString(trustManagers));
-                }
-
+            } catch (java.security.cert.CertificateException ce) {
+                throw new CertificateException("error while creating Certificate", ce);
+            } catch (IOException ioe) {
+                throw new CertificateException("io error with the server-certificate file.", ioe);
             } catch (NoSuchAlgorithmException nsae) {
-                throw new SocketException("unknown algorithm: " + TrustManagerFactory.getDefaultAlgorithm(), nsae);
-            } catch (CertificateException ce) {
-                throw new SocketException("error while creating CertificateFactory", ce);
+                throw new CertificateException("Unknown algorithm: X.509 || RSA", nsae);
             } catch (KeyStoreException kse) {
-                throw new SocketException("error while creating keystore", kse);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+                throw new CertificateException("Error while initializing KeyStore with server-certificates", kse);
             }
 
             SSLContext sslContext;
             try {
-                // TODO : use "TLSv1.3" for api > 29
                 // Get an instance of SSLContext for TLS protocols
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // For API level 29 and above, use "TLSv1.3"
+                    sslContext = SSLContext.getInstance("TLSv1.3");
+                } else {
+                    // For API level below 29, use "TLSv1.2"
+                    sslContext = SSLContext.getInstance("TLSv1.2");
+                }
 
-                // An SSLContext is a collection of ciphers, protocol versions,
-                // trusted certificates, TLS options, TLS extensions etc.
-                // Since it is very common to have multiple connections with the same settings
-                // they are put together in a context and the relevant SSL connections
-                // are then created based on this context.
-                //
-                // The SSLSocket is used to create an SSLEngine which is used to
-                // establish a secure connection between two endpoints.
-                sslContext = SSLContext.getInstance("TLSv1.2");
                 sslContext.init(
                         keyManagerFactory.getKeyManagers(),
-                        trustManagerFactory.getTrustManagers(),
+                        allTrustManagers,
                         new SecureRandom());
 
             } catch (NoSuchAlgorithmException nsae) {
-                throw new SocketException("unknown algorithm: TLSv1.2", nsae);
+                throw new SocketException("unknown ssl algorithm: TLSv1.?", nsae);
             } catch (KeyManagementException kme) {
                 throw new SocketException("error while creating connection context", kme);
             }
 
             try {
+                // Use the SSLContext to create SSLSockets
                 SocketFactory factory = sslContext.getSocketFactory();
                 SSLSocket sslSocket =
                         (SSLSocket) factory.createSocket(host, port);
@@ -456,8 +407,8 @@ public class Socket {
                 // Use as client
                 sslSocket.setKeepAlive(true);
                 sslSocket.setUseClientMode(true);
-//                sslSocket.setEnabledCipherSuites(
-//                        new String[]{"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"});
+                // sslSocket.setEnabledCipherSuites(
+                // new String[]{"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"});
 
                 HostnameVerifier hv = HttpsURLConnection.getDefaultHostnameVerifier();
                 SSLSession sslSession = sslSocket.getSession();
@@ -568,12 +519,9 @@ public class Socket {
             receiver.run();
         } catch (SocketException wse) {
             eventHandler.onError(wse);
-        }  catch (Exception e) {
+        } catch (Throwable e) {
             e.printStackTrace();
             eventHandler.onError(new SocketException("error while connecting: " + e.getMessage(), e));
-        } catch (Throwable t) {
-            t.printStackTrace();
-            eventHandler.onError(new SocketException("error while connecting: " + t.getMessage(), t));
         } finally {
             close();
         }
